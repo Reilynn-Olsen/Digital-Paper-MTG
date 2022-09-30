@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+type apiSortedData = {amount: number, cardName: string}
+
 function GetDeck() {
   const [deckList, setDeckList] = useState<string>('')
 
@@ -53,14 +55,19 @@ function GetDeck() {
   1 Woe Strider
   1 Xander's Lounge`
 
+  const sortDeck = (cardName: string): apiSortedData => {return {amount: Number(cardName.match(/[0-9]+/)[0]), cardName: cardName.match(/[^0-9]+/)[0].trim()}};
+
   const handleSubmit = async (e: React.MouseEvent) => {
     e.preventDefault()
-    const deckListArray = deckList.split('\n')
+    // const deckListArray = deckList.split('\n')
+    const deckListArray = deck.split('\n').map(sortDeck)
     if (deckListArray.length > 0){
-      const resArray = await Promise.all(deckListArray.map(card => fetch(`https://api.scryfall.com/cards/named?exact=${card.trim()}`), {
-        
-      }))
-      console.log(resArray.map(obj => !obj.ok ? console.log(obj) : null))
+      //const resArray = await Promise.all(deckListArray.map(card => fetch(`https://api.scryfall.com/cards/named?exact=${card.trim()}`)
+      // console.log(resArray.map(obj => !obj.ok ? console.log(obj) : null))
+      console.log(deckListArray[0])
+      const res = await fetch(`https://api.scryfall.com/cards/named?exact=${deckListArray[0].cardName}`)
+      console.log(res)
+      
     } else {
       alert('Decklist field Empty')
     }
