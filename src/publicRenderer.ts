@@ -25,7 +25,7 @@
  *  });
  * ```
  */
-  import './publicInfo/publicApp'
+  import './publicInfo/PublicApp'
   
 
 console.log('👋 This message is being logged by "renderer.js", included via webpack');
