@@ -1,12 +1,48 @@
 import React, { useState } from 'react';
+type GetDeckProps = { transmitDecklist(a: deck): void };
+type sortedUserDeckList = { amount: number; name: string };
 
-type apiSortedData = {amount: number, cardName: string}
+type scryFallCard = {
+  name: string;
+  type_line: string;
+  image_uris: {
+    small: string;
+    normal: string;
+  };
+};
 
-function GetDeck() {
-  const [deckList, setDeckList] = useState<string>('')
+type scryFallMDFC = {
+  name: string;
+  card_faces: [scryFallCard, scryFallCard];
+};
 
-  const deck = 
-  `1 A Little Chat
+type scryFallData = scryFallCard | scryFallMDFC;
+
+const isCardObj = (value: unknown): value is cardObj =>
+  typeof value === 'object' &&
+  'MDFC' in value &&
+  'name' in value &&
+  'image' in value &&
+  'lineType' in value;
+
+const isCommanderTuple = (
+  value: unknown[]
+): value is [cardObj] | [cardObj, cardObj] =>
+  (value.length === 2 || value.length === 1) &&
+  value.every((el) => isCardObj(el));
+
+const hasDeckProps = (
+  value: unknown
+): value is { commander: unknown[]; deck: unknown[] } =>
+  typeof value === 'object' && 'commander' in value && 'deck' in value;
+
+const isDeck = (value: unknown): value is deck =>
+  hasDeckProps(value) &&
+  isCommanderTuple(value.commander) &&
+  value.deck.every((el: unknown) => isCardObj(el));
+
+function GetDeck(Props: GetDeckProps) {
+  const sampleDeck = `1 A Little Chat
   1 Alchemist's Gambit
   1 Arcane Signet
   1 Archmage Emeritus
@@ -53,34 +89,152 @@ function GetDeck() {
   1 Unsubstantiate
   1 Unwind
   1 Woe Strider
-  1 Xander's Lounge`
+  1 Xander's Lounge`;
 
-  const sortDeck = (cardName: string): apiSortedData => {return {amount: Number(cardName.match(/[0-9]+/)[0]), cardName: cardName.match(/[^0-9]+/)[0].trim()}};
+  const [decklist, setDecklist] = useState<string>(sampleDeck);
+  const [commanders, setCommanders] = useState<[string, string]>([
+    'Anhelo, The Painter',
+    '',
+  ]);
+
+  const sortDeck = (cardName: string): sortedUserDeckList => {
+    return {
+      amount: Number(cardName.match(/[0-9\n]+/)[0]),
+      name: cardName.match(/[^0-9\s][^0-9\n]+/)[0].trim(),
+    };
+  };
+
+  const formatCard = (data: scryFallData): cardObj[] => {
+    const sortedData: cardObj[] = [];
+    if ('card_faces' in data) {
+      sortedData.push({
+        MDFC: true,
+        image: {
+          front: data.card_faces[0].image_uris.small,
+          back: data.card_faces[1].image_uris.small,
+        },
+        name: {
+          front: data.card_faces[0].name,
+          back: data.card_faces[1].name,
+        },
+        lineType: {
+          front: data.card_faces[0].type_line,
+          back: data.card_faces[0].type_line,
+        },
+      });
+    } else {
+      sortedData.push({
+        MDFC: false,
+        image: data.image_uris.small,
+        name: data.name,
+        lineType: data.type_line,
+      });
+    }
+    return sortedData;
+  };
 
   const handleSubmit = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    // const deckListArray = deckList.split('\n')
-    const deckListArray = deck.split('\n').map(sortDeck)
-    if (deckListArray.length > 0){
-      //const resArray = await Promise.all(deckListArray.map(card => fetch(`https://api.scryfall.com/cards/named?exact=${card.trim()}`)
-      // console.log(resArray.map(obj => !obj.ok ? console.log(obj) : null))
-      console.log(deckListArray[0])
-      const res = await fetch(`https://api.scryfall.com/cards/named?exact=${deckListArray[0].cardName}`)
-      console.log(res)
-      
-    } else {
-      alert('Decklist field Empty')
+    e.preventDefault();
+    const commanderReq = [];
+
+    if (commanders[0]) {
+      commanderReq.push(
+        fetch(
+          `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(
+            commanders[0]
+          )}`
+        )
+      );
     }
-    
-  }
+    if (commanders[1]) {
+      commanderReq.push(
+        fetch(
+          `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(
+            commanders[1]
+          )}`
+        )
+      );
+    }
+    let commanderData: cardObj[] = [];
+    const commanderRes = await Promise.all(commanderReq);
+    for await (const commander of commanderRes) {
+      const data = await commander.json();
+      commanderData = commanderData.concat(formatCard(data));
+    }
+
+    const decklistArray = decklist
+      .split('\n')
+      .map(sortDeck)
+      .filter(
+        (obj) => obj.name !== commanders[0] || obj.name !== commanders[1]
+      );
+    if (decklistArray.length > 0) {
+      try {
+        const resArray = await Promise.all(
+          decklistArray.map((card) =>
+            fetch(
+              `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(
+                card.name
+              )}`
+            )
+          )
+        );
+        let sortedData: cardObj[] = [];
+        let amountIndex = 0;
+        for await (const obj of resArray) {
+          if (obj.ok) {
+            const data = await obj.json();
+            for (let i = 0; i < decklistArray[amountIndex].amount; i++) {
+              sortedData = sortedData.concat(formatCard(data));
+            }
+            amountIndex++;
+          } else {
+            console.log(obj.status);
+            console.log(obj.statusText);
+          }
+        }
+        const deckObj = { commander: commanderData, deck: sortedData };
+
+        if (isDeck(deckObj)) {
+          Props.transmitDecklist(deckObj);
+        }
+      } catch (err) {
+        console.log(err);
+      }
+    } else {
+      alert('Decklist field Empty');
+    }
+  };
   return (
     <div>
       <h2>Enter your decklist below:</h2>
       <p>Please enter your deck in moxfield format (no sideboard)</p>
       <form>
-        <label>Deck:</label><br/>
-        <textarea onChange={(e) => setDeckList(e.target.value)} value={deckList}></textarea>
-        <button type="submit" onClick={handleSubmit}>Submit deck!</button>
+        <label>Commander:</label>
+        <br />
+        <input
+          type="text"
+          value={commanders[0]}
+          onChange={(e) => setCommanders((prev) => [e.target.value, prev[1]])}
+        ></input>
+        <br />
+        <label>Partner:</label>
+        <br />
+        <input
+          type="text"
+          value={commanders[1]}
+          onChange={(e) => setCommanders((prev) => [prev[0], e.target.value])}
+        ></input>
+        <br />
+        <label>Deck:</label>
+        <br />
+        <textarea
+          onChange={(e) => setDecklist(e.target.value)}
+          value={decklist}
+        ></textarea>
+        <button type="submit" onClick={handleSubmit}>
+          Submit deck!
+        </button>
       </form>
     </div>
   );
